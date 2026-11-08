@@ -10,6 +10,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const MAX_LENGTH = 10000;
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
@@ -124,7 +126,6 @@ app.post('/analyze', uploadResume, async (req, res) => {
     return res.status(400).json({ error: 'jobPosting must be more detailed' });
   }
 
-  const MAX_LENGTH = 10000; // ~ a few pages of text, generous for a resume/job posting
   if (resume.length > MAX_LENGTH || jobPosting.length > MAX_LENGTH) {
     return res.status(400).json({ error: 'resume and jobPosting must be under 10,000 characters' });
   }
