@@ -1,13 +1,10 @@
-
-
-
-
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const Anthropic = require('@anthropic-ai/sdk');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
+const cheerio = require('cheerio');
 
 const app = express();
 app.use(cors());
@@ -35,17 +32,73 @@ const uploadResume = (req, res, next) => {
   });
 };
 
-app.get('/', (req, res) => {
+async function fetchJobText(urlString) {
+  let url;
+  try {
+    url = new URL(urlString);
+  } catch {
+    throw new Error('that is not a valid URL');
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('URL must start with http:// or https://');
+  }
+
+  // Basic guard: don't let people point your server at private/internal addresses
+  const host = url.hostname;
+  const isPrivate =
+    host === 'localhost' ||
+    host === '0.0.0.0' ||
+    host.endsWith('.local') ||
+    /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+  if (isPrivate) {
+    throw new Error('that address is not allowed');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResumeAnalyzer/1.0)' }
+    });
+    if (!res.ok) {
+      throw new Error(`the page returned status ${res.status}`);
+    }
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    $('script, style, nav, footer, header, noscript, svg').remove();
+    return $('body').text().replace(/\s+/g, ' ').trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+app.get('/', (_req, res) => {
   res.send('Resume Analyzer API is running');
 });
 
 app.post('/analyze', uploadResume, async (req, res) => {
-  const { jobPosting } = req.body;
+  const { jobPosting, jobUrl } = req.body;
   const file = req.file;
 
-  if (!resume || !jobPosting) {
-    return res.status(400).json({ error: 'resume and jobPosting are both required' });
+  let jobText = jobPosting;
+  if (!jobText && jobUrl) {
+    try {
+      jobText = await fetchJobText(jobUrl);
+    } catch (err) {
+      return res.status(400).json({
+        error: `Couldn't read that link (${err.message}). Try pasting the job text instead.`
+      });
+    }
   }
+
+  if (!file || !jobText) {
+    return res.status(400).json({ error: 'resume file and a job posting (text or link) are required' });
+  }
+
+  jobText = jobText.slice(0, MAX_LENGTH);
 
   if (file.mimetype !== 'application/pdf') {
     return res.status(400).json({ error: 'Resume must be a PDF' });
@@ -80,28 +133,27 @@ app.post('/analyze', uploadResume, async (req, res) => {
   const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
   try {
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
-      messages: [
-        {
-          role: 'user',
-          content: `You are a resume analysis assistant. Compare the resume and job posting below.
+    const prompt = `You are a resume analysis assistant. Compare the resume and job posting below.
 
 Resume:
 ${resume}
 
 Job Posting:
-${jobPosting}
+${jobText}
+
+The job posting text may include website navigation or boilerplate. Focus only on the job description itself.
 
 Respond ONLY with valid JSON, no markdown formatting, no preamble, in exactly this shape:
 {
   "missing_keywords": ["keyword1", "keyword2"],
   "bullet_suggestions": [{"original": "...", "improved": "..."}],
   "summary": "one or two sentence overall summary"
-}`
-        },
-      ]
+}`;
+
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: prompt }]
     }, { signal: controller.signal });
 
     clearTimeout(timeout);
