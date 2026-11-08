@@ -114,20 +114,20 @@ app.post('/analyze', uploadResume, async (req, res) => {
     return res.status(400).json({ error: 'Could not read that PDF' });
   }
 
-  if (typeof jobPosting !== 'string') {
-    return res.status(400).json({ error: 'jobPosting must be text' });
+  if (typeof jobText !== 'string') {
+    return res.status(400).json({ error: 'jobText must be text' });
   }
 
   if (resume.trim().length < 20) {
     return res.status(400).json({ error: 'Could not extract text from this PDF. If it is a scan, try a text-based PDF.' });
   }
 
-  if (jobPosting.trim().length < 20) {
-    return res.status(400).json({ error: 'jobPosting must be more detailed' });
+  if (jobText.trim().length < 20) {
+    return res.status(400).json({ error: 'jobText must be more detailed' });
   }
 
-  if (resume.length > MAX_LENGTH || jobPosting.length > MAX_LENGTH) {
-    return res.status(400).json({ error: 'resume and jobPosting must be under 10,000 characters' });
+  if (resume.length > MAX_LENGTH || jobText.length > MAX_LENGTH) {
+    return res.status(400).json({ error: 'resume and jobText must be under 10,000 characters' });
   }
 
   const controller = new AbortController();
