@@ -6,6 +6,8 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const Anthropic = require('@anthropic-ai/sdk');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
 
 const app = express();
 app.use(cors());
@@ -14,6 +16,24 @@ app.use(express.json());
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB cap
+});
+
+// Wrapper so upload errors (like a file that's too big) return clean JSON
+const uploadResume = (req, res, next) => {
+  upload.single('resume')(req, res, (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE'
+        ? 'File must be under 5MB'
+        : 'File upload failed';
+      return res.status(400).json({ error: msg });
+    }
+    next();
+  });
+};
 
 app.get('/', (req, res) => {
   res.send('Resume Analyzer API is running');
@@ -26,12 +46,20 @@ app.post('/analyze', async (req, res) => {
     return res.status(400).json({ error: 'resume and jobPosting are both required' });
   }
 
-  if (typeof resume !== 'string' || typeof jobPosting !== 'string') {
-    return res.status(400).json({ error: 'resume and jobPosting must be text' });
+  if (file.mimetype !== 'application/pdf') {
+    return res.status(400).json({ error: 'Resume must be a PDF' });
   }
 
-  if (resume.trim().length < 20 || jobPosting.trim().length < 20) {
-    return res.status(400).json({ error: 'resume and jobPosting must be more detailed' });
+  if (typeof jobPosting !== 'string') {
+    return res.status(400).json({ error: 'jobPosting must be text' });
+  }
+
+  if (resume.trim().length < 20) {
+    return res.status(400).json({ error: 'Could not extract text from this PDF. If it is a scan, try a text-based PDF.' });
+  }
+
+  if (jobPosting.trim().length < 20) {
+    return res.status(400).json({ error: 'jobPosting must be more detailed' });
   }
 
   const MAX_LENGTH = 10000; // ~ a few pages of text, generous for a resume/job posting
