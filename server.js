@@ -39,8 +39,9 @@ app.get('/', (req, res) => {
   res.send('Resume Analyzer API is running');
 });
 
-app.post('/analyze', async (req, res) => {
-  const { resume, jobPosting } = req.body;
+app.post('/analyze', uploadResume, async (req, res) => {
+  const { jobPosting } = req.body;
+  const file = req.file;
 
   if (!resume || !jobPosting) {
     return res.status(400).json({ error: 'resume and jobPosting are both required' });
@@ -48,6 +49,14 @@ app.post('/analyze', async (req, res) => {
 
   if (file.mimetype !== 'application/pdf') {
     return res.status(400).json({ error: 'Resume must be a PDF' });
+  }
+
+  let resume;
+  try {
+    const parsed = await pdfParse(file.buffer);
+    resume = parsed.text;
+  } catch (err) {
+    return res.status(400).json({ error: 'Could not read that PDF' });
   }
 
   if (typeof jobPosting !== 'string') {
