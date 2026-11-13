@@ -220,7 +220,6 @@ ${resume}
 Job Posting:
 ${jobText}
 
-${suggestionBlock}
 The job posting text may include website navigation or boilerplate. Focus only on the job description itself.
 
 Respond ONLY with valid JSON, no markdown formatting, no preamble, in exactly this shape:
