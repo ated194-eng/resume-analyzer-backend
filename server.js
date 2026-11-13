@@ -194,119 +194,13 @@ function buildResumePdf(data, res) {
   doc.end();
 }
 
-function parseSuggestions(raw) {
-  if (!raw) return null;
-  try {
-    const s = JSON.parse(raw);
-    const keywords = Array.isArray(s.missing_keywords)
-      ? s.missing_keywords.filter((k) => typeof k === 'string').slice(0, 20).map((k) => k.slice(0, 60))
-      : [];
-    const bullets = Array.isArray(s.bullet_suggestions)
-      ? s.bullet_suggestions
-          .filter((b) => b && typeof b.original === 'string' && typeof b.improved === 'string')
-          .slice(0, 10)
-          .map((b) => ({ original: b.original.slice(0, 500), improved: b.improved.slice(0, 500) }))
-      : [];
-    return { keywords, bullets };
-  } catch {
-    return null;
-  }
-}
-
 app.get('/', (_req, res) => {
   res.send('Resume Analyzer API is running');
-});
-
-app.post('/analyze', uploadResume, async (req, res) => {
-  try {
-    const { resume, jobText } = await getResumeAndJob(req);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-    
-    const prompt = `You are a resume analysis assistant. Compare the resume and job posting below.
-
-Resume:
-${resume}
-
-Job Posting:
-${jobText}
-
-The job posting text may include website navigation or boilerplate. Focus only on the job description itself.
-
-Each "improved" bullet must be ready to paste into the resume as written. Use only facts already in the resume, and do not include advice or phrases like "consider" or "if applicable". Put any advice in the summary instead.
-
-Respond ONLY with valid JSON, no markdown formatting, no preamble, in exactly this shape:
-{
-  "missing_keywords": ["keyword1", "keyword2"],
-  "bullet_suggestions": [{"original": "...", "improved": "..."}],
-  "summary": "one or two sentence overall summary"
-}`;
-
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: prompt }]
-    }, { signal: controller.signal });
-
-    clearTimeout(timeout);
-
-    const rawText = message.content[0].text;
-    const cleaned = rawText.replace(/```json|```/g, '').trim();
-
-    let parsed;
-    try {
-    parsed = JSON.parse(cleaned);
-    } catch (parseErr) {
-    console.error('Failed to parse model response as JSON:', rawText);
-    return res.status(502).json({ error: 'Received an unexpected response format. Please try again.' });
-    }
-
-    res.json(parsed);
-  } catch (err) {
-    console.error('Error in /analyze', err);
-
-    if (err instanceof InputError) {
-      return res.status(400).json({ error: err.message });
-    }
-
-    if (err instanceof SyntaxError) {
-    // JSON.parse failed — the model didn't return clean JSON
-    return res.status(502).json({ error: 'Received an unexpected response format. Please try again.' });
-    }
-
-    if (err.status === 401) {
-        return res.status(500).json({ error: 'Server configuration error' }); // don't leak API key details to the client
-    }
-
-    if (err.status === 429) {
-        return res.status(429).json({ error: 'Too many requests right now. Please try again in a moment.' });
-    }
-
-    if (err.status === 400) {
-        return res.status(400).json({ error: 'Invalid request to AI service' });
-    }
-
-    res.status(500).json({ error: 'Failed to analyze resume' });
-  }
 });
 
 app.post('/tailor', uploadResume, async (req, res) => {
   try {
     const { resume, jobText } = await getResumeAndJob(req);
-
-    const suggestions = parseSuggestions(req.body.suggestions);
-    const suggestionBlock = suggestions
-      ? `The candidate already reviewed an analysis of this resume. Apply it where it is accurate:
-
-    Keywords worth including (only where the resume genuinely supports them): ${suggestions.keywords.join(', ')}
-
-    Bullet rewrites to use (original -> improved):
-    ${suggestions.bullets.map((b) => `- "${b.original}" -> "${b.improved}"`).join('\n')}
-
-    If a suggested rewrite contains advice rather than resume wording, or adds anything not in the original resume, ignore the suggestion and write the best accurate version of that bullet instead.
-    `
-      : '';
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60000);
