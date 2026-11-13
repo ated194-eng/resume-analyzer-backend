@@ -194,6 +194,25 @@ function buildResumePdf(data, res) {
   doc.end();
 }
 
+function parseSuggestions(raw) {
+  if (!raw) return null;
+  try {
+    const s = JSON.parse(raw);
+    const keywords = Array.isArray(s.missing_keywords)
+      ? s.missing_keywords.filter((k) => typeof k === 'string').slice(0, 20).map((k) => k.slice(0, 60))
+      : [];
+    const bullets = Array.isArray(s.bullet_suggestions)
+      ? s.bullet_suggestions
+          .filter((b) => b && typeof b.original === 'string' && typeof b.improved === 'string')
+          .slice(0, 10)
+          .map((b) => ({ original: b.original.slice(0, 500), improved: b.improved.slice(0, 500) }))
+      : [];
+    return { keywords, bullets };
+  } catch {
+    return null;
+  }
+}
+
 app.get('/', (_req, res) => {
   res.send('Resume Analyzer API is running');
 });
@@ -214,6 +233,8 @@ Job Posting:
 ${jobText}
 
 The job posting text may include website navigation or boilerplate. Focus only on the job description itself.
+
+Each "improved" bullet must be ready to paste into the resume as written. Use only facts already in the resume, and do not include advice or phrases like "consider" or "if applicable". Put any advice in the summary instead.
 
 Respond ONLY with valid JSON, no markdown formatting, no preamble, in exactly this shape:
 {
@@ -274,6 +295,19 @@ app.post('/tailor', uploadResume, async (req, res) => {
   try {
     const { resume, jobText } = await getResumeAndJob(req);
 
+    const suggestions = parseSuggestions(req.body.suggestions);
+    const suggestionBlock = suggestions
+      ? `The candidate already reviewed an analysis of this resume. Apply it where it is accurate:
+
+    Keywords worth including (only where the resume genuinely supports them): ${suggestions.keywords.join(', ')}
+
+    Bullet rewrites to use (original -> improved):
+    ${suggestions.bullets.map((b) => `- "${b.original}" -> "${b.improved}"`).join('\n')}
+
+    If a suggested rewrite contains advice rather than resume wording, or adds anything not in the original resume, ignore the suggestion and write the best accurate version of that bullet instead.
+    `
+      : '';
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60000);
 
@@ -292,6 +326,7 @@ ${resume}
 Job Posting:
 ${jobText}
 
+${suggestionBlock}
 The job posting text may include website navigation or boilerplate. Focus only on the job description itself.
 
 Respond ONLY with valid JSON, no markdown formatting, no preamble, in exactly this shape:
